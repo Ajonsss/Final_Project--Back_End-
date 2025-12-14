@@ -33,6 +33,18 @@ const Financial = {
     reactivateLoan: (loanId, callback) => {
         db.query("UPDATE loans SET status = IF(current_balance > 0, 'active', 'completed') WHERE id = ?", [loanId], callback);
     },
+
+        deleteLoan: (loanId, callback) => {
+        // 1. Delete associated records first (Safety)
+        const sqlRecords = "DELETE FROM financial_records WHERE loan_id = ?";
+        db.query(sqlRecords, [loanId], (err, res) => {
+            if (err) return callback(err, null);
+
+            // 2. Delete the loan
+            const sqlLoan = "DELETE FROM loans WHERE id = ?";
+            db.query(sqlLoan, [loanId], callback);
+        });
+    },
 }
 
 module.exports = Financial;
