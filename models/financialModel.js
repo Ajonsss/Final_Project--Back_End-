@@ -45,6 +45,26 @@ const Financial = {
             db.query(sqlLoan, [loanId], callback);
         });
     },
+        createRecord: (data, callback) => {
+        const sql = "INSERT INTO financial_records (user_id, type, amount, due_date, status, loan_id) VALUES (?, ?, ?, ?, 'pending', ?)";
+        db.query(sql, [data.user_id, data.type, data.amount, data.due_date, data.loan_id], callback);
+    },
+
+    getRecordsByUser: (userId, callback) => {
+        const sql = `SELECT fr.*, l.loan_name 
+                     FROM financial_records fr 
+                     LEFT JOIN loans l ON fr.loan_id = l.id 
+                     WHERE fr.user_id = ? ORDER BY fr.due_date DESC`;
+        db.query(sql, [userId], callback);
+    },
+
+    findById: (id, callback) => {
+        db.query("SELECT * FROM financial_records WHERE id = ?", [id], callback);
+    },
+
+    updateStatus: (id, status, callback) => {
+        db.query("UPDATE financial_records SET status = ?, date_recorded = NOW() WHERE id = ?", [status, id], callback);
+    },
 }
 
 module.exports = Financial;
