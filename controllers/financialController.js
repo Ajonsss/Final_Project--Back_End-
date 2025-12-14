@@ -56,5 +56,72 @@ exports.sendSmsNotification = (req, res) => {
         console.error("SMS Error Details:", err.response ? err.response.data : err.message);
         return res.json({ Error: "Failed to connect to SMS Gateway" });
     });
+    // --- LOANS ---
+exports.assignLoan = (req, res) => {
+    if (req.user.role !== 'leader') return res.json({ Error: "Access Denied" });
+
+    const { user_id, amount, loan_name, weeks, payment_day, weekly_amount } = req.body;
+
+    Financial.findActiveLoan(user_id, (err, result) => {
+        if (result.length > 0) return res.json({ Error: "Member already has an active loan." });
+
+        const loanData = {
+            user_id,
+            amount,
+            loan_name: loan_name || 'Personal Loan',
+            weeks_to_pay: weeks,
+            payment_day: payment_day,
+            weekly_amount: weekly_amount
+        };
+
+        Financial.createLoan(loanData, (err, loanResult) => {
+            if (err) return res.json({ Error: "Database Error" });
+
+            const newLoanId = loanResult.insertId;
+
+            // --- AUTOMATIC SCHEDULE GENERATION ---
+            let currentDateTracker = new Date();
+
+            for (let i = 0; i < weeks; i++) {
+                currentDateTracker = getNextDayOfWeek(currentDateTracker, payment_day);
+
+                const recordData = {
+                    user_id: user_id,
+                    type: 'loan_payment',
+                    amount: weekly_amount,
+                    due_date: currentDateTracker.toISOString().split('T')[0],
+                    loan_id: newLoanId,
+                    status: 'pending'
+                };
+
+                Financial.createRecord(recordData, () => { });
+            }
+
+            // Notifications
+            User.findById(user_id, (err, userRes) => {
+                const memberName = userRes[0]?.full_name || "Member";
+                const memberMsg = `New Loan: ${loanData.loan_name} - ₱${amount}. Payable in ${weeks} weeks (₱${weekly_amount}/week).`;
+                const adminMsg = `You assigned Loan (${loanData.loan_name}) to ${memberName}`;
+
+                Notification.create(user_id, memberMsg, () => { });
+                Notification.create(req.user.id, adminMsg, () => { });
+
+                return res.json({ Status: "Success" });
+            });
+        });
+    });
+};
+
+// --- DELETE LOAN ---
+exports.deleteActiveLoan = (req, res) => {
+    if (req.user.role !== 'leader') return res.json({ Error: "Access Denied" });
+    const loanId = req.params.loanId;
+
+    Financial.deleteLoan(loanId, (err) => {
+        if (err) return res.json({ Error: "Error deleting loan" });
+        return res.json({ Status: "Success" });
+    });
+};
+
 };
 www.iprogsms.com
