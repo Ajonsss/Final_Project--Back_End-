@@ -122,6 +122,28 @@ exports.deleteActiveLoan = (req, res) => {
         return res.json({ Status: "Success" });
     });
 };
+// --- RECORDS ---
+exports.assignRecord = (req, res) => {
+    if (req.user.role !== 'leader') return res.json({ Error: "Access Denied" });
+    const { user_id, type, amount, due_date, loan_id } = req.body;
 
+    const data = { user_id, type, amount, due_date, loan_id: loan_id || null };
+    Financial.createRecord(data, (err) => {
+        if (err) return res.json({ Error: "Database Error" });
+
+        // Notifications
+        User.findById(user_id, (err, userRes) => {
+            const memberName = userRes[0]?.full_name || "Member";
+            let typeText = type === 'loan_payment' ? 'Loan Payment' : (type === 'savings' ? 'Savings' : 'Insurance');
+            const memberMsg = `Reminder: ${typeText} of ₱${amount} is due on ${due_date}`;
+            const adminMsg = `You assigned a ${typeText} (₱${amount}) to ${memberName}`;
+
+            Notification.create(user_id, memberMsg, () => { });
+            Notification.create(req.user.id, adminMsg, () => { });
+
+            res.json({ Status: "Success" });
+        });
+    });
+};
 };
 www.iprogsms.com
