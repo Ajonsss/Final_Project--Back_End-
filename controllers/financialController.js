@@ -131,19 +131,51 @@ exports.assignRecord = (req, res) => {
     Financial.createRecord(data, (err) => {
         if (err) return res.json({ Error: "Database Error" });
 
-        // Notifications
+        
         User.findById(user_id, (err, userRes) => {
+            
             const memberName = userRes[0]?.full_name || "Member";
             let typeText = type === 'loan_payment' ? 'Loan Payment' : (type === 'savings' ? 'Savings' : 'Insurance');
             const memberMsg = `Reminder: ${typeText} of ₱${amount} is due on ${due_date}`;
             const adminMsg = `You assigned a ${typeText} (₱${amount}) to ${memberName}`;
 
             Notification.create(user_id, memberMsg, () => { });
+
             Notification.create(req.user.id, adminMsg, () => { });
 
             res.json({ Status: "Success" });
         });
     });
 };
+
+exports.markPaid = (req, res) => {
+    if (req.user.role !== 'leader') return res.json({ Error: "Access Denied" });
+
+    Financial.findById(req.params.id, (err, result) => {
+        if (err || result.length === 0) return res.json({ Error: "Record not found" });
+        const record = result[0];
+
+        if (['paid', 'late', 'cashed_out'].includes(record.status)) return res.json({ Error: "Already paid" });
+
+        const today = new Date();
+        const due = new Date(record.due_date);
+        today.setHours(0, 0, 0, 0); due.setHours(0, 0, 0, 0);
+        const newStatus = today > due ? 'late' : 'paid';
+
+        Financial.updateStatus(req.params.id, newStatus, (err) => {
+            if (err) return res.json({ Error: "Error updating record" });
+
+            if (record.type === 'loan_payment' && record.loan_id) {
+                Financial.updateLoanBalance(record.loan_id, record.amount, '-', (err) => {
+                    Financial.closeLoan(record.loan_id, () => { });
+                    return res.json({ Status: "Success" });
+                });
+            } else {
+                return res.json({ Status: "Success" });
+            }
+        });
+    });
 };
-www.iprogsms.com
+
+};
+
