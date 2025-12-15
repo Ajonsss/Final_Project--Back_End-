@@ -198,7 +198,7 @@ exports.resetStatus = (req, res) => {
     });
 };
 
-// --- AUTOMATED REMINDERS ---
+
 exports.sendAutomatedDueReminders = async () => {
     console.log('Starting automated due reminders...');
 
@@ -214,8 +214,7 @@ exports.sendAutomatedDueReminders = async () => {
         `;
 
 
-        // Note: Make sure 'db' and 'sendSms' are imported/defined in this file
-        // If they are missing, you might need: const db = require('../config/db');
+
         const [records] = await db.query(sql);
 
         if (!records || records.length === 0) {
@@ -234,7 +233,6 @@ exports.sendAutomatedDueReminders = async () => {
             const dueDate = new Date(due_date).toLocaleDateString();
             const message = `Hi ${full_name}, your ${typeText} of ₱${amount} is due on ${dueDate}. Please settle promptly.`;
 
-            // Assuming sendSms is a valid function or you meant to use exports.sendSmsNotification logic
             const result = await sendSms(phone_number, message);
 
             if (result.success) {
