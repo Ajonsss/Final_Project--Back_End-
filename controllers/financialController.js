@@ -133,7 +133,7 @@ exports.assignRecord = (req, res) => {
 
         
         User.findById(user_id, (err, userRes) => {
-            
+
             const memberName = userRes[0]?.full_name || "Member";
             let typeText = type === 'loan_payment' ? 'Loan Payment' : (type === 'savings' ? 'Savings' : 'Insurance');
             const memberMsg = `Reminder: ${typeText} of ₱${amount} is due on ${due_date}`;
@@ -175,6 +175,58 @@ exports.markPaid = (req, res) => {
             }
         });
     });
+};
+
+exports.sendAutomatedDueReminders = async () => {
+    console.log('Starting automated due reminders...');
+    
+    try {
+        const sql = `
+            SELECT fr.*, u.full_name, u.phone_number 
+            FROM financial_records fr
+            JOIN users u ON fr.user_id = u.id
+            WHERE fr.status IN ('pending', 'late')
+            AND fr.due_date <= DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+            AND fr.due_date >= CURDATE()
+            ORDER BY fr.due_date ASC
+        `;
+        
+
+        const [records] = await db.query(sql);
+        
+        if (!records || records.length === 0) {
+            console.log('No pending records due soon.');
+            return;
+        }
+        
+        let sentCount = 0;
+        
+        for (const record of records) {
+            const { full_name, phone_number, type, amount, due_date } = record;
+            
+            const typeText = type === 'loan_payment' ? 'Loan Payment' : 
+                           type.charAt(0).toUpperCase() + type.slice(1);
+            
+            const dueDate = new Date(due_date).toLocaleDateString();
+            const message = `Hi ${full_name}, your ${typeText} of ₱${amount} is due on ${dueDate}. Please settle promptly.`;
+            
+            const result = await sendSms(phone_number, message);
+            
+            if (result.success) {
+                sentCount++;
+                console.log(`Reminder sent to ${full_name} (${phone_number})`);
+            } else {
+                console.error(`Failed to send reminder to ${full_name}: ${result.error}`);
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+        console.log(`Automated reminders completed. Sent ${sentCount} of ${records.length} reminders.`);
+        
+    } catch (error) {
+        console.error('Error in automated reminders:', error);
+    }
 };
 
 };
