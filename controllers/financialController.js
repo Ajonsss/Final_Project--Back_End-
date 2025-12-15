@@ -176,6 +176,23 @@ exports.markPaid = (req, res) => {
         });
     });
 };
+exports.resetStatus = (req, res) => {
+    if (req.user.role !== 'leader') return res.json({ Error: "Access Denied" });
 
+    Financial.findById(req.params.id, (err, result) => {
+        if (err || result.length === 0) return res.json({ Error: "Record not found" });
+        const record = result[0];
+
+        if (record.type === 'loan_payment' && record.loan_id && ['paid', 'late'].includes(record.status)) {
+            Financial.updateLoanBalance(record.loan_id, record.amount, '+', () => {
+                Financial.reactivateLoan(record.loan_id, () => {
+                    Financial.updateStatus(req.params.id, 'pending', () => res.json({ Status: "Success" }));
+                });
+            });
+        } else {
+            Financial.updateStatus(req.params.id, 'pending', () => res.json({ Status: "Success" }));
+        }
+    });
+};
 };
 
