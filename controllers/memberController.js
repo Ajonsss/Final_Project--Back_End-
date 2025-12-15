@@ -70,3 +70,11 @@ exports.updateAdminPassword = async (req, res) => {
         return res.json({ Status: "Success" });
     });
 };
+
+exports.updateMemberDetails = (req, res) => {
+    if (req.user.role !== 'leader') return res.json({ Error: "Access Denied" });
+    User.updateDetails(req.params.id, req.body, (err) => {
+        if (err) return res.json({ Error: "Error updating member" });
+        return res.json({ Status: "Success" });
+    });
+};
