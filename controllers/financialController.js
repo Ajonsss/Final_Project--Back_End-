@@ -251,3 +251,34 @@ exports.sendAutomatedDueReminders = async () => {
         console.error('Error in automated reminders:', error);
     }
 };
+
+exports.getMemberDetails = (req, res) => {
+    const userId = req.params.id;
+    if (req.user.role !== 'leader' && req.user.id != userId) return res.json({ Error: "Access Denied" });
+
+    User.findById(userId, (err, userRes) => {
+        if (err || userRes.length === 0) return res.json({ Error: "User not found" });
+        const user = userRes[0];
+
+        if (user.role === 'leader') {
+            delete user.profile_picture; delete user.birthdate; delete user.spouse_name;
+        }
+
+        Financial.findActiveLoan(userId, (err, loanRes) => {
+            Financial.getRecordsByUser(userId, (err, recordRes) => {
+                Notification.getByUser(userId, (err, notifRes) => {
+                    Financial.getTotals(userId, (err, totals) => {
+                        return res.json({
+                            user,
+                            activeLoan: loanRes[0] || null,
+                            records: recordRes,
+                            notifications: notifRes,
+                            savingsTotal: totals.savings,
+                            insuranceTotal: totals.insurance
+                        });
+                    });
+                });
+            });
+        });
+    });
+};
