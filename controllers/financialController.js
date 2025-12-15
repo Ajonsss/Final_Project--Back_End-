@@ -298,3 +298,28 @@ exports.updateAdminPhone = (req, res) => {
         return res.json({ Status: "Success" });
     });
 };
+
+exports.updateMemberAuth = async (req, res) => {
+    if (req.user.role !== 'leader') return res.json({ Error: "Access Denied" });
+    
+    const { new_phone, new_password } = req.body;
+    const memberId = req.params.id;
+
+    if (new_phone) {
+        User.updatePhone(memberId, new_phone, (err) => {
+            if (err) console.log("Phone update error:", err);
+        });
+    }
+
+    if (new_password) {
+        if (!isStrongPassword(new_password)) {
+            return res.json({ Error: "Weak Password. Use 8+ chars, Uppercase, Lowercase, Number, Special Char." });
+        }
+        const hash = await bcrypt.hash(new_password.toString(), 10);
+        User.updatePassword(memberId, hash, (err) => {
+            if (err) return res.json({ Error: "Error updating password" });
+        });
+    }
+
+    return res.json({ Status: "Success" });
+};
