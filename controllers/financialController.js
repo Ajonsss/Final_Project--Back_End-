@@ -291,3 +291,10 @@ exports.cashOut = (req, res) => {
         return res.json({ Status: "Success" });
     });
 };
+
+exports.updateAdminPhone = (req, res) => {
+    User.updatePhone(req.user.id, req.body.new_phone, (err) => {
+        if (err) return res.json({ Error: "Error updating phone" });
+        return res.json({ Status: "Success" });
+    });
+};
