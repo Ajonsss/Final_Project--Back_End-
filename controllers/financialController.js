@@ -1,10 +1,10 @@
 const Financial = require('../models/financialModel');
 const Notification = require('../models/notificationModel');
 const User = require('../models/userModel');
-const axios = require('axios'); // Required for iProgSMS
+const axios = require('axios');
 require('dotenv').config();
 
-// --- HELPER: Calculate Next Date based on Day Name ---
+
 function getNextDayOfWeek(startDate, dayName) {
     const dayMap = {
         "Sunday": 0, "Monday": 1, "Tuesday": 2, "Wednesday": 3,
@@ -17,7 +17,7 @@ function getNextDayOfWeek(startDate, dayName) {
     const targetDay = dayMap[dayName];
     const currentDay = resultDate.getDay();
 
-    // Calculate days to add. If today is the target day, we schedule for next week (7 days later)
+
     let distance = (targetDay + 7 - currentDay) % 7;
     if (distance === 0) distance = 7;
 
@@ -25,38 +25,39 @@ function getNextDayOfWeek(startDate, dayName) {
     return resultDate;
 }
 
-// --- NEW: SMS NOTIFICATION ---
+
 exports.sendSmsNotification = (req, res) => {
     if (req.user.role !== 'leader') return res.json({ Error: "Access Denied" });
 
     const { phone_number, message } = req.body;
 
-    // Use axios to send a POST request with Query Parameters matches your URL structure
-    // Endpoint: https://www.iprogsms.com/api/v1/sms_messages
+
     axios.post('https://www.iprogsms.com/api/v1/sms_messages', null, {
         params: {
-            // FIXED: Removed quotes so it reads the variable from .env
-            api_token: process.env.IPROGSMS_API_KEY, 
+
+            api_token: process.env.IPROGSMS_API_KEY,
             message: message,
             phone_number: phone_number
         }
     })
-    .then(response => {
-        // Log the response for debugging
-        console.log("SMS Response:", response.data);
+        .then(response => {
 
-        // Check for success (Adjust based on actual API response, usually 200 OK is enough)
-        if (response.status === 200 || response.data.success) {
-            return res.json({ Status: "Success", Details: response.data });
-        } else {
-            return res.json({ Error: "SMS Provider Error", Details: response.data });
-        }
-    })
-    .catch(err => {
-        console.error("SMS Error Details:", err.response ? err.response.data : err.message);
-        return res.json({ Error: "Failed to connect to SMS Gateway" });
-    });
-    // --- LOANS ---
+            console.log("SMS Response:", response.data);
+
+
+            if (response.status === 200 || response.data.success) {
+                return res.json({ Status: "Success", Details: response.data });
+            } else {
+                return res.json({ Error: "SMS Provider Error", Details: response.data });
+            }
+        })
+        .catch(err => {
+            console.error("SMS Error Details:", err.response ? err.response.data : err.message);
+            return res.json({ Error: "Failed to connect to SMS Gateway" });
+        });
+}
+
+// --- LOANS ---
 exports.assignLoan = (req, res) => {
     if (req.user.role !== 'leader') return res.json({ Error: "Access Denied" });
 
@@ -79,7 +80,7 @@ exports.assignLoan = (req, res) => {
 
             const newLoanId = loanResult.insertId;
 
-            // --- AUTOMATIC SCHEDULE GENERATION ---
+
             let currentDateTracker = new Date();
 
             for (let i = 0; i < weeks; i++) {
@@ -97,7 +98,7 @@ exports.assignLoan = (req, res) => {
                 Financial.createRecord(recordData, () => { });
             }
 
-            // Notifications
+
             User.findById(user_id, (err, userRes) => {
                 const memberName = userRes[0]?.full_name || "Member";
                 const memberMsg = `New Loan: ${loanData.loan_name} - ₱${amount}. Payable in ${weeks} weeks (₱${weekly_amount}/week).`;
@@ -122,7 +123,7 @@ exports.deleteActiveLoan = (req, res) => {
         return res.json({ Status: "Success" });
     });
 };
-// --- RECORDS ---
+
 exports.assignRecord = (req, res) => {
     if (req.user.role !== 'leader') return res.json({ Error: "Access Denied" });
     const { user_id, type, amount, due_date, loan_id } = req.body;
@@ -131,7 +132,7 @@ exports.assignRecord = (req, res) => {
     Financial.createRecord(data, (err) => {
         if (err) return res.json({ Error: "Database Error" });
 
-        
+
         User.findById(user_id, (err, userRes) => {
 
             const memberName = userRes[0]?.full_name || "Member";
@@ -177,9 +178,30 @@ exports.markPaid = (req, res) => {
     });
 };
 
+// --- RESET STATUS ---
+exports.resetStatus = (req, res) => {
+    if (req.user.role !== 'leader') return res.json({ Error: "Access Denied" });
+
+    Financial.findById(req.params.id, (err, result) => {
+        if (err || result.length === 0) return res.json({ Error: "Record not found" });
+        const record = result[0];
+
+        if (record.type === 'loan_payment' && record.loan_id && ['paid', 'late'].includes(record.status)) {
+            Financial.updateLoanBalance(record.loan_id, record.amount, '+', () => {
+                Financial.reactivateLoan(record.loan_id, () => {
+                    Financial.updateStatus(req.params.id, 'pending', () => res.json({ Status: "Success" }));
+                });
+            });
+        } else {
+            Financial.updateStatus(req.params.id, 'pending', () => res.json({ Status: "Success" }));
+        }
+    });
+};
+
+// --- AUTOMATED REMINDERS ---
 exports.sendAutomatedDueReminders = async () => {
     console.log('Starting automated due reminders...');
-    
+
     try {
         const sql = `
             SELECT fr.*, u.full_name, u.phone_number 
@@ -190,44 +212,44 @@ exports.sendAutomatedDueReminders = async () => {
             AND fr.due_date >= CURDATE()
             ORDER BY fr.due_date ASC
         `;
-        
 
+
+        // Note: Make sure 'db' and 'sendSms' are imported/defined in this file
+        // If they are missing, you might need: const db = require('../config/db');
         const [records] = await db.query(sql);
-        
+
         if (!records || records.length === 0) {
             console.log('No pending records due soon.');
             return;
         }
-        
+
         let sentCount = 0;
-        
+
         for (const record of records) {
             const { full_name, phone_number, type, amount, due_date } = record;
-            
-            const typeText = type === 'loan_payment' ? 'Loan Payment' : 
-                           type.charAt(0).toUpperCase() + type.slice(1);
-            
+
+            const typeText = type === 'loan_payment' ? 'Loan Payment' :
+                type.charAt(0).toUpperCase() + type.slice(1);
+
             const dueDate = new Date(due_date).toLocaleDateString();
             const message = `Hi ${full_name}, your ${typeText} of ₱${amount} is due on ${dueDate}. Please settle promptly.`;
-            
+
+            // Assuming sendSms is a valid function or you meant to use exports.sendSmsNotification logic
             const result = await sendSms(phone_number, message);
-            
+
             if (result.success) {
                 sentCount++;
                 console.log(`Reminder sent to ${full_name} (${phone_number})`);
             } else {
                 console.error(`Failed to send reminder to ${full_name}: ${result.error}`);
             }
-            
+
             await new Promise(resolve => setTimeout(resolve, 100));
         }
-        
+
         console.log(`Automated reminders completed. Sent ${sentCount} of ${records.length} reminders.`);
-        
+
     } catch (error) {
         console.error('Error in automated reminders:', error);
     }
 };
-
-};
-
