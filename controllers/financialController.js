@@ -1,7 +1,7 @@
 const Financial = require('../models/financialModel');
 const Notification = require('../models/notificationModel');
 const User = require('../models/userModel');
-const axios = require('axios'); 
+const axios = require('axios');
 require('dotenv').config();
 
 
@@ -34,28 +34,30 @@ exports.sendSmsNotification = (req, res) => {
 
     axios.post('https://www.iprogsms.com/api/v1/sms_messages', null, {
         params: {
-            
-            api_token: process.env.IPROGSMS_API_KEY, 
+
+            api_token: process.env.IPROGSMS_API_KEY,
             message: message,
             phone_number: phone_number
         }
     })
-    .then(response => {
-        
-        console.log("SMS Response:", response.data);
+        .then(response => {
+
+            console.log("SMS Response:", response.data);
 
 
-        if (response.status === 200 || response.data.success) {
-            return res.json({ Status: "Success", Details: response.data });
-        } else {
-            return res.json({ Error: "SMS Provider Error", Details: response.data });
-        }
-    })
-    .catch(err => {
-        console.error("SMS Error Details:", err.response ? err.response.data : err.message);
-        return res.json({ Error: "Failed to connect to SMS Gateway" });
-    });
-    // --- LOANS ---
+            if (response.status === 200 || response.data.success) {
+                return res.json({ Status: "Success", Details: response.data });
+            } else {
+                return res.json({ Error: "SMS Provider Error", Details: response.data });
+            }
+        })
+        .catch(err => {
+            console.error("SMS Error Details:", err.response ? err.response.data : err.message);
+            return res.json({ Error: "Failed to connect to SMS Gateway" });
+        });
+}
+
+// --- LOANS ---
 exports.assignLoan = (req, res) => {
     if (req.user.role !== 'leader') return res.json({ Error: "Access Denied" });
 
@@ -96,7 +98,7 @@ exports.assignLoan = (req, res) => {
                 Financial.createRecord(recordData, () => { });
             }
 
-            
+
             User.findById(user_id, (err, userRes) => {
                 const memberName = userRes[0]?.full_name || "Member";
                 const memberMsg = `New Loan: ${loanData.loan_name} - ₱${amount}. Payable in ${weeks} weeks (₱${weekly_amount}/week).`;
@@ -130,9 +132,9 @@ exports.assignRecord = (req, res) => {
     Financial.createRecord(data, (err) => {
         if (err) return res.json({ Error: "Database Error" });
 
-        
+
         User.findById(user_id, (err, userRes) => {
-            
+
             const memberName = userRes[0]?.full_name || "Member";
             let typeText = type === 'loan_payment' ? 'Loan Payment' : (type === 'savings' ? 'Savings' : 'Insurance');
             const memberMsg = `Reminder: ${typeText} of ₱${amount} is due on ${due_date}`;
@@ -175,6 +177,8 @@ exports.markPaid = (req, res) => {
         });
     });
 };
+
+// --- RESET STATUS ---
 exports.resetStatus = (req, res) => {
     if (req.user.role !== 'leader') return res.json({ Error: "Access Denied" });
 
@@ -193,5 +197,59 @@ exports.resetStatus = (req, res) => {
         }
     });
 };
-};
 
+// --- AUTOMATED REMINDERS ---
+exports.sendAutomatedDueReminders = async () => {
+    console.log('Starting automated due reminders...');
+
+    try {
+        const sql = `
+            SELECT fr.*, u.full_name, u.phone_number 
+            FROM financial_records fr
+            JOIN users u ON fr.user_id = u.id
+            WHERE fr.status IN ('pending', 'late')
+            AND fr.due_date <= DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+            AND fr.due_date >= CURDATE()
+            ORDER BY fr.due_date ASC
+        `;
+
+
+        // Note: Make sure 'db' and 'sendSms' are imported/defined in this file
+        // If they are missing, you might need: const db = require('../config/db');
+        const [records] = await db.query(sql);
+
+        if (!records || records.length === 0) {
+            console.log('No pending records due soon.');
+            return;
+        }
+
+        let sentCount = 0;
+
+        for (const record of records) {
+            const { full_name, phone_number, type, amount, due_date } = record;
+
+            const typeText = type === 'loan_payment' ? 'Loan Payment' :
+                type.charAt(0).toUpperCase() + type.slice(1);
+
+            const dueDate = new Date(due_date).toLocaleDateString();
+            const message = `Hi ${full_name}, your ${typeText} of ₱${amount} is due on ${dueDate}. Please settle promptly.`;
+
+            // Assuming sendSms is a valid function or you meant to use exports.sendSmsNotification logic
+            const result = await sendSms(phone_number, message);
+
+            if (result.success) {
+                sentCount++;
+                console.log(`Reminder sent to ${full_name} (${phone_number})`);
+            } else {
+                console.error(`Failed to send reminder to ${full_name}: ${result.error}`);
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+        console.log(`Automated reminders completed. Sent ${sentCount} of ${records.length} reminders.`);
+
+    } catch (error) {
+        console.error('Error in automated reminders:', error);
+    }
+};
