@@ -282,6 +282,12 @@ exports.getMemberDetails = (req, res) => {
         });
     });
 
+};
 
-
+exports.cashOut = (req, res) => {
+    if (req.user.role !== 'leader') return res.json({ Error: "Access Denied" });
+    Financial.cashOut(req.body.user_id, req.body.type, (err) => {
+        if (err) return res.json({ Error: "Error cashing out" });
+        return res.json({ Status: "Success" });
+    });
 };
