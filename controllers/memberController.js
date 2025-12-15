@@ -58,3 +58,15 @@ exports.deleteMember = (req, res) => {
         return res.json({ Status: "Success" });
     });
 };
+
+exports.updateAdminPassword = async (req, res) => {
+    if (!isStrongPassword(req.body.new_password)) {
+        return res.json({ Error: "Weak Password. Use 8+ chars, Uppercase, Lowercase, Number, Special Char." });
+    }
+
+    const hash = await bcrypt.hash(req.body.new_password.toString(), 10);
+    User.updatePassword(req.user.id, hash, (err) => {
+        if (err) return res.json({ Error: "Error updating password" });
+        return res.json({ Status: "Success" });
+    });
+};
