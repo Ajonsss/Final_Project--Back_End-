@@ -31,16 +31,20 @@ const Financial = {
         db.query("UPDATE loans SET status = IF(current_balance > 0, 'active', 'completed') WHERE id = ?", [loanId], callback);
     },
 
+    // NEW: Delete Loan Function
     deleteLoan: (loanId, callback) => {
+        // 1. Delete associated records first (Safety)
         const sqlRecords = "DELETE FROM financial_records WHERE loan_id = ?";
         db.query(sqlRecords, [loanId], (err, res) => {
             if (err) return callback(err, null);
 
+            // 2. Delete the loan
             const sqlLoan = "DELETE FROM loans WHERE id = ?";
             db.query(sqlLoan, [loanId], callback);
         });
     },
 
+    // --- RECORDS ---
     createRecord: (data, callback) => {
         const sql = "INSERT INTO financial_records (user_id, type, amount, due_date, status, loan_id) VALUES (?, ?, ?, ?, 'pending', ?)";
         db.query(sql, [data.user_id, data.type, data.amount, data.due_date, data.loan_id], callback);
@@ -71,6 +75,7 @@ const Financial = {
         db.query(sql, [userId, type], callback);
     },
     
+    // --- TOTALS ---
     getTotals: (userId, callback) => {
         const queries = {
             savings: "SELECT SUM(amount) as total FROM financial_records WHERE user_id = ? AND type = 'savings' AND (status = 'paid' OR status = 'late')",
