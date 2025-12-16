@@ -1,10 +1,10 @@
 const Financial = require('../models/financialModel');
 const Notification = require('../models/notificationModel');
 const User = require('../models/userModel');
-const axios = require('axios');
+const axios = require('axios'); // Required for iProgSMS
 require('dotenv').config();
 
-
+// --- HELPER: Calculate Next Date based on Day Name ---
 function getNextDayOfWeek(startDate, dayName) {
     const dayMap = {
         "Sunday": 0, "Monday": 1, "Tuesday": 2, "Wednesday": 3,
@@ -17,7 +17,7 @@ function getNextDayOfWeek(startDate, dayName) {
     const targetDay = dayMap[dayName];
     const currentDay = resultDate.getDay();
 
-
+    // Calculate days to add. If today is the target day, we schedule for next week (7 days later)
     let distance = (targetDay + 7 - currentDay) % 7;
     if (distance === 0) distance = 7;
 
@@ -25,37 +25,38 @@ function getNextDayOfWeek(startDate, dayName) {
     return resultDate;
 }
 
-
+// --- NEW: SMS NOTIFICATION ---z
 exports.sendSmsNotification = (req, res) => {
     if (req.user.role !== 'leader') return res.json({ Error: "Access Denied" });
 
     const { phone_number, message } = req.body;
 
-
+    // Use axios to send a POST request with Query Parameters matches your URL structure
+    // Endpoint: https://www.iprogsms.com/api/v1/sms_messages
     axios.post('https://www.iprogsms.com/api/v1/sms_messages', null, {
         params: {
-
-            api_token: process.env.IPROGSMS_API_KEY,
+            // FIXED: Removed quotes so it reads the variable from .env
+            api_token: process.env.IPROGSMS_API_KEY, 
             message: message,
             phone_number: phone_number
         }
     })
-        .then(response => {
+    .then(response => {
+        // Log the response for debugging
+        console.log("SMS Response:", response.data);
 
-            console.log("SMS Response:", response.data);
-
-
-            if (response.status === 200 || response.data.success) {
-                return res.json({ Status: "Success", Details: response.data });
-            } else {
-                return res.json({ Error: "SMS Provider Error", Details: response.data });
-            }
-        })
-        .catch(err => {
-            console.error("SMS Error Details:", err.response ? err.response.data : err.message);
-            return res.json({ Error: "Failed to connect to SMS Gateway" });
-        });
-}
+        // Check for success (Adjust based on actual API response, usually 200 OK is enough)
+        if (response.status === 200 || response.data.success) {
+            return res.json({ Status: "Success", Details: response.data });
+        } else {
+            return res.json({ Error: "SMS Provider Error", Details: response.data });
+        }
+    })
+    .catch(err => {
+        console.error("SMS Error Details:", err.response ? err.response.data : err.message);
+        return res.json({ Error: "Failed to connect to SMS Gateway" });
+    });
+};
 
 // --- LOANS ---
 exports.assignLoan = (req, res) => {
@@ -80,7 +81,7 @@ exports.assignLoan = (req, res) => {
 
             const newLoanId = loanResult.insertId;
 
-
+            // --- AUTOMATIC SCHEDULE GENERATION ---
             let currentDateTracker = new Date();
 
             for (let i = 0; i < weeks; i++) {
@@ -98,7 +99,7 @@ exports.assignLoan = (req, res) => {
                 Financial.createRecord(recordData, () => { });
             }
 
-
+            // Notifications
             User.findById(user_id, (err, userRes) => {
                 const memberName = userRes[0]?.full_name || "Member";
                 const memberMsg = `New Loan: ${loanData.loan_name} - ₱${amount}. Payable in ${weeks} weeks (₱${weekly_amount}/week).`;
@@ -124,6 +125,7 @@ exports.deleteActiveLoan = (req, res) => {
     });
 };
 
+// --- RECORDS ---
 exports.assignRecord = (req, res) => {
     if (req.user.role !== 'leader') return res.json({ Error: "Access Denied" });
     const { user_id, type, amount, due_date, loan_id } = req.body;
@@ -132,16 +134,15 @@ exports.assignRecord = (req, res) => {
     Financial.createRecord(data, (err) => {
         if (err) return res.json({ Error: "Database Error" });
 
-
+        // Notifications
         User.findById(user_id, (err, userRes) => {
-
+            
             const memberName = userRes[0]?.full_name || "Member";
             let typeText = type === 'loan_payment' ? 'Loan Payment' : (type === 'savings' ? 'Savings' : 'Insurance');
             const memberMsg = `Reminder: ${typeText} of ₱${amount} is due on ${due_date}`;
             const adminMsg = `You assigned a ${typeText} (₱${amount}) to ${memberName}`;
 
             Notification.create(user_id, memberMsg, () => { });
-
             Notification.create(req.user.id, adminMsg, () => { });
 
             res.json({ Status: "Success" });
@@ -178,7 +179,6 @@ exports.markPaid = (req, res) => {
     });
 };
 
-// --- RESET STATUS ---
 exports.resetStatus = (req, res) => {
     if (req.user.role !== 'leader') return res.json({ Error: "Access Denied" });
 
@@ -198,58 +198,31 @@ exports.resetStatus = (req, res) => {
     });
 };
 
+exports.deleteRecord = (req, res) => {
+    if (req.user.role !== 'leader') return res.json({ Error: "Access Denied" });
 
-exports.sendAutomatedDueReminders = async () => {
-    console.log('Starting automated due reminders...');
+    Financial.findById(req.params.id, (err, result) => {
+        if (err || result.length === 0) return res.json({ Error: "Record not found" });
+        const record = result[0];
 
-    try {
-        const sql = `
-            SELECT fr.*, u.full_name, u.phone_number 
-            FROM financial_records fr
-            JOIN users u ON fr.user_id = u.id
-            WHERE fr.status IN ('pending', 'late')
-            AND fr.due_date <= DATE_ADD(CURDATE(), INTERVAL 1 DAY)
-            AND fr.due_date >= CURDATE()
-            ORDER BY fr.due_date ASC
-        `;
-
-
-
-        const [records] = await db.query(sql);
-
-        if (!records || records.length === 0) {
-            console.log('No pending records due soon.');
-            return;
+        if (record.type === 'loan_payment' && record.loan_id && ['paid', 'late'].includes(record.status)) {
+            Financial.updateLoanBalance(record.loan_id, record.amount, '+', () => {
+                Financial.reactivateLoan(record.loan_id, () => {
+                    Financial.deleteRecord(req.params.id, () => res.json({ Status: "Success" }));
+                });
+            });
+        } else {
+            Financial.deleteRecord(req.params.id, () => res.json({ Status: "Success" }));
         }
+    });
+};
 
-        let sentCount = 0;
-
-        for (const record of records) {
-            const { full_name, phone_number, type, amount, due_date } = record;
-
-            const typeText = type === 'loan_payment' ? 'Loan Payment' :
-                type.charAt(0).toUpperCase() + type.slice(1);
-
-            const dueDate = new Date(due_date).toLocaleDateString();
-            const message = `Hi ${full_name}, your ${typeText} of ₱${amount} is due on ${dueDate}. Please settle promptly.`;
-
-            const result = await sendSms(phone_number, message);
-
-            if (result.success) {
-                sentCount++;
-                console.log(`Reminder sent to ${full_name} (${phone_number})`);
-            } else {
-                console.error(`Failed to send reminder to ${full_name}: ${result.error}`);
-            }
-
-            await new Promise(resolve => setTimeout(resolve, 100));
-        }
-
-        console.log(`Automated reminders completed. Sent ${sentCount} of ${records.length} reminders.`);
-
-    } catch (error) {
-        console.error('Error in automated reminders:', error);
-    }
+exports.cashOut = (req, res) => {
+    if (req.user.role !== 'leader') return res.json({ Error: "Access Denied" });
+    Financial.cashOut(req.body.user_id, req.body.type, (err) => {
+        if (err) return res.json({ Error: "Error cashing out" });
+        return res.json({ Status: "Success" });
+    });
 };
 
 exports.getMemberDetails = (req, res) => {
@@ -281,45 +254,15 @@ exports.getMemberDetails = (req, res) => {
             });
         });
     });
-
 };
 
-exports.cashOut = (req, res) => {
-    if (req.user.role !== 'leader') return res.json({ Error: "Access Denied" });
-    Financial.cashOut(req.body.user_id, req.body.type, (err) => {
-        if (err) return res.json({ Error: "Error cashing out" });
-        return res.json({ Status: "Success" });
+exports.getMyRecords = (req, res) => {
+    if (req.user.id != req.params.id && req.user.role !== 'leader') return res.json({ Error: "Access Denied" });
+    Financial.getRecordsByUser(req.params.id, (err, result) => {
+        return res.json({ Result: result });
     });
 };
 
-exports.updateAdminPhone = (req, res) => {
-    User.updatePhone(req.user.id, req.body.new_phone, (err) => {
-        if (err) return res.json({ Error: "Error updating phone" });
-        return res.json({ Status: "Success" });
-    });
-};
-
-exports.updateMemberAuth = async (req, res) => {
-    if (req.user.role !== 'leader') return res.json({ Error: "Access Denied" });
-    
-    const { new_phone, new_password } = req.body;
-    const memberId = req.params.id;
-
-    if (new_phone) {
-        User.updatePhone(memberId, new_phone, (err) => {
-            if (err) console.log("Phone update error:", err);
-        });
-    }
-
-    if (new_password) {
-        if (!isStrongPassword(new_password)) {
-            return res.json({ Error: "Weak Password. Use 8+ chars, Uppercase, Lowercase, Number, Special Char." });
-        }
-        const hash = await bcrypt.hash(new_password.toString(), 10);
-        User.updatePassword(memberId, hash, (err) => {
-            if (err) return res.json({ Error: "Error updating password" });
-        });
-    }
-
-    return res.json({ Status: "Success" });
+exports.markNotificationRead = (req, res) => {
+    Notification.markRead(req.params.id, () => res.json({ Status: "Success" }));
 };
